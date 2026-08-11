@@ -1,0 +1,25 @@
+services:
+  app:
+    build: .
+    image: ai-future-skills-intelligence-engine:latest
+    container_name: ai-future-skills
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      # Persistent SQLite database stored in the named volume below.
+      DATABASE_URL: file:/data/dev.db
+      JWT_SECRET: ${JWT_SECRET:-change-me-to-a-long-random-string}
+      FRONTEND_URL: http://localhost:4000
+      BACKEND_URL: http://localhost:4000
+      # "template" = deterministic built-in engine, no OpenAI key needed.
+      # To use GPT-based analysis, set AI_PROVIDER=openai and add OPENAI_API_KEY.
+      AI_PROVIDER: template
+      SEED_ON_START: "true"
+    volumes:
+      - app-data:/data
+    restart: unless-stopped
+
+volumes:
+  app-data:

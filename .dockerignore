@@ -1,0 +1,31 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+build
+
+# Env files (never ship secrets)
+.env
+.env.*
+
+# Local databases
+*.db
+*.db-journal
+dev.db
+
+# Logs
+*.log
+*.log.err
+
+# Git / editor / OS
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Test / coverage
+coverage
+*.tsbuildinfo

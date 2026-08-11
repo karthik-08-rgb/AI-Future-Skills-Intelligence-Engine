@@ -2,14 +2,31 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import fs from "fs";
+import path from "path";
 import { config } from "./config";
 import routes from "./routes";
 import { notFoundHandler, errorHandler } from "./middleware/errors";
 import { requestLogger } from "./middleware";
 import { logger } from "./utils/logger";
 
+/** Resolve the compiled frontend bundle (frontend/dist) relative to this file. */
+function frontendDistPath(): string | null {
+  const candidates = [
+    path.resolve(__dirname, "../../../frontend/dist"),
+    path.resolve(__dirname, "../../frontend/dist"),
+    path.resolve(process.cwd(), "frontend/dist"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, "index.html"))) return candidate;
+  }
+  return null;
+}
+
 export function createApp() {
   const app = express();
+
+  const staticDir = frontendDistPath();
 
   app.set("trust proxy", 1);
 
@@ -39,14 +56,18 @@ export function createApp() {
     }),
   );
 
-  app.get("/", (_req, res) => {
-    res.json({
-      name: "AI Future Skills Intelligence Engine API",
-      version: "1.0.0",
-      status: "ok",
-      docs: "/docs",
+  // In API-only mode (no built frontend) the root reports API info. When the
+  // built SPA is present, "/" is handled by express.static below.
+  if (!staticDir) {
+    app.get("/", (_req, res) => {
+      res.json({
+        name: "AI Future Skills Intelligence Engine API",
+        version: "1.0.0",
+        status: "ok",
+        docs: "/docs",
+      });
     });
-  });
+  }
 
   app.use("/api", routes);
 
@@ -80,6 +101,16 @@ GET    /api/health</pre>
       <p>See README and docs/architecture.md for full details.</p></body></html>`,
     );
   });
+
+  // Serve the built frontend (single-container deployment). Skipped in dev
+  // where the Vite dev server handles the UI and its own /api proxy.
+  if (staticDir) {
+    logger.info("serving.static", { dir: staticDir });
+    app.use(express.static(staticDir, { index: "index.html", maxAge: "1h" }));
+    app.get(/^(?!\/api).*/, (_req, res) => {
+      res.sendFile(path.join(staticDir, "index.html"));
+    });
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);
