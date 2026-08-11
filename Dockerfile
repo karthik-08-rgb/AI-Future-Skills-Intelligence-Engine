@@ -12,11 +12,10 @@ COPY backend/package.json backend/package.json
 COPY frontend/package.json frontend/package.json
 RUN npm ci
 
-# Generate Prisma client before compiling backend (tsc needs its types)
+COPY . .
 RUN npm run db:generate --workspace=backend
 
 # Compile backend (tsc -> backend/dist) and frontend (vite -> frontend/dist)
-COPY . .
 RUN npm run build
 
 # ---- Runtime stage ----

@@ -19,7 +19,7 @@ npm run dev         # backend :4000 + frontend :5173
 - UI: http://localhost:5173
 - API: http://localhost:4000/api
 - API reference: http://localhost:4000/docs
-- Demo login: `admin@novatech.com` / `demo1234` (see `DEMO_SEED_PASSWORD` in `.env`)
+- Demo login: `admin@novatech.demo` / `demo1234` (see `DEMO_SEED_PASSWORD` in `.env`)
 
 ## Production (single container)
 
