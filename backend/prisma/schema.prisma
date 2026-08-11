@@ -1,0 +1,545 @@
+// ---------------------------------------------------------------------------
+// AI Future Skills Intelligence Engine — Prisma schema
+//
+// Portability note: this schema is intentionally written using only types that
+// are portable between SQLite and PostgreSQL (no native enums, no array types).
+// The local demo runs on SQLite. For production, switch the provider below to
+// "postgresql", set DATABASE_URL, and run `npm run db:migrate`.
+//
+// Every organization-owned entity carries an `organizationId` for tenant
+// scoping. Tenant isolation is enforced at the service/query layer as well.
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & Identity
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  description  String?
+  industryId   String?
+  industry     Industry? @relation(fields: [industryId], references: [id])
+  isDemo       Boolean  @default(false)
+  settings     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  members      User[]
+  processes    Process[]
+  roles        Role[]
+  skills       Skill[]
+  futureSkills FutureSkill[]
+  knowledgeSources KnowledgeSource[]
+  recommendations Recommendation[]
+  auditLogs    AuditLog[]
+  aiInteractions AiInteraction[]
+  imports      DataImport[]
+  activities   Activity[]
+
+  @@index([industryId])
+  @@index([slug])
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("MEMBER") // SUPER_ADMIN | ORG_ADMIN | ANALYST | MEMBER | VIEWER
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  lastLoginAt  DateTime?
+  deletedAt    DateTime?
+
+  aiInteractions AiInteraction[]
+  feedback    Feedback[]
+  auditLogs   AuditLog[]
+  knowledgeSources KnowledgeSource[]
+
+  @@index([organizationId])
+  @@index([email])
+}
+
+model Industry {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+  settings    Json?   // industry-specific config, e.g. relevance weights
+  isSystem    Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organizations Organization[]
+  processes  Process[]
+  roles      Role[]
+  skills     Skill[]
+  futureSkills FutureSkill[]
+  knowledgeSources KnowledgeSource[]
+}
+
+// ---------------------------------------------------------------------------
+// Core domain: Process → Activity → Role → Skill
+// ---------------------------------------------------------------------------
+
+model Process {
+  id           String   @id @default(cuid())
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  industryId   String
+  industry     Industry @relation(fields: [industryId], references: [id])
+  name         String
+  description  String?
+  category     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  activities   Activity[]
+  processAiImpacts ProcessAiImpact[]
+
+  @@unique([organizationId, industryId, name])
+  @@index([industryId])
+  @@index([organizationId])
+}
+
+model Activity {
+  id           String   @id @default(cuid())
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  processId    String
+  process      Process  @relation(fields: [processId], references: [id], onDelete: Cascade)
+  name         String
+  description  String?
+  // Deterministic AI-characterization inputs (0-1)
+  automationPotential   Float @default(0)
+  augmentationPotential Float @default(0)
+  humanDependency       Float @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  roles        ActivityRole[]
+  skills       ActivitySkill[]
+  aiImpacts    AiImpact[]
+
+  @@index([processId])
+  @@index([organizationId])
+}
+
+model Role {
+  id           String   @id @default(cuid())
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  industryId   String
+  industry     Industry @relation(fields: [industryId], references: [id])
+  name         String
+  description  String?
+  department   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  skills       RoleSkill[]
+  activities   ActivityRole[]
+  futureSkills RoleFutureSkill[]
+  recommendations Recommendation[]
+  aiImpacts    AiImpact[]
+
+  @@unique([organizationId, industryId, name])
+  @@index([industryId])
+  @@index([organizationId])
+}
+
+model Skill {
+  id           String   @id @default(cuid())
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  industryId   String
+  industry     Industry @relation(fields: [industryId], references: [id])
+  name         String
+  description  String?
+  category     String   @default("Technical") // Technical | Human Capability | Domain
+  // Deterministic skill attributes (0-1)
+  automationExposure    Float @default(0.5) // how automatable the skill's application is
+  augmentationExposure  Float @default(0.5) // how strongly AI assists this skill
+  humanDependency       Float @default(0.5) // how much human judgment is required
+  isFuture     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  roles        RoleSkill[]
+  activities   ActivitySkill[]
+  aiImpacts    AiImpact[]
+  futureSkills FutureSkill[]
+
+  @@unique([organizationId, industryId, name])
+  @@index([industryId])
+  @@index([organizationId])
+  @@index([isFuture])
+}
+
+// Current-skill assignment of a role
+model RoleSkill {
+  id          String @id @default(cuid())
+  organizationId String?
+  roleId      String
+  role        Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  skillId     String
+  skill       Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  importance  Float  @default(0.5) // 0-1 importance of the skill to the role
+  proficiency Float  @default(0.5) // 0-1 current proficiency
+
+  @@unique([roleId, skillId])
+  @@index([roleId])
+  @@index([skillId])
+}
+
+// Which roles are involved in an activity
+model ActivityRole {
+  id          String @id @default(cuid())
+  activityId  String
+  activity    Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  roleId      String
+  role        Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  involvement Float    @default(0.5) // 0-1 share of the activity performed by the role
+
+  @@unique([activityId, roleId])
+  @@index([activityId])
+  @@index([roleId])
+}
+
+// Which skills an activity relies on
+model ActivitySkill {
+  id          String @id @default(cuid())
+  activityId  String
+  activity    Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  skillId     String
+  skill       Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  relevance   Float    @default(0.5) // 0-1 relevance of the skill to the activity
+
+  @@unique([activityId, skillId])
+  @@index([activityId])
+  @@index([skillId])
+}
+
+// ---------------------------------------------------------------------------
+// AI Impact & Future Skills
+// ---------------------------------------------------------------------------
+
+model AiImpact {
+  id          String @id @default(cuid())
+  organizationId String?
+  activityId  String?
+  activity    Activity? @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  roleId      String?
+  role        Role?     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  skillId     String?
+  skill       Skill?    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  impactType  String    // Emerging | Increasing | AI-Augmented | Changing | Declining | Enduring Human Capability
+  impactScore Float     @default(0)
+  automationPotential Float @default(0)
+  augmentationPotential Float @default(0)
+  humanDependency Float  @default(0.5)
+  confidence  Float     @default(0.5)
+  reason      String?
+  evidence    Json?     // supporting structured facts
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([activityId])
+  @@index([roleId])
+  @@index([skillId])
+  @@index([impactType])
+  @@index([organizationId])
+}
+
+model FutureSkill {
+  id           String @id @default(cuid())
+  organizationId String?
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  industryId   String
+  industry     Industry @relation(fields: [industryId], references: [id])
+  skillId      String?
+  skill        Skill?  @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  name         String
+  description  String?
+  category     String @default("Technical")
+  demandSignal Float  @default(0.5) // seed signal for AI demand
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  roleFutureSkills RoleFutureSkill[]
+  scores       FutureSkillScore[]
+  recommendations Recommendation[]
+
+  @@unique([organizationId, industryId, name])
+  @@index([industryId])
+  @@index([organizationId])
+}
+
+model RoleFutureSkill {
+  id          String @id @default(cuid())
+  organizationId String?
+  roleId      String
+  role        Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  futureSkillId String
+  futureSkill FutureSkill @relation(fields: [futureSkillId], references: [id], onDelete: Cascade)
+  priority    Float @default(0.5) // 0-1 priority for the role
+  currentGap  Float @default(1)  // 0-1 gap between current and required proficiency
+
+  @@unique([roleId, futureSkillId])
+  @@index([roleId])
+  @@index([futureSkillId])
+}
+
+model FutureSkillScore {
+  id          String @id @default(cuid())
+  organizationId String?
+  futureSkillId String
+  futureSkill FutureSkill @relation(fields: [futureSkillId], references: [id], onDelete: Cascade)
+  aiDemand          Float @default(0) // 0-100
+  processImpact     Float @default(0) // 0-100
+  roleRelevance     Float @default(0) // 0-100
+  skillGap          Float @default(0) // 0-100
+  industryRelevance Float @default(0) // 0-100
+  transformationImpact Float @default(0) // 0-100
+  finalScore        Float @default(0) // 0-100
+  confidence        Float @default(0.5)
+  computedAt        DateTime @default(now())
+
+  @@index([futureSkillId])
+  @@index([organizationId])
+}
+
+// Aggregated AI transformation view of a process
+model ProcessAiImpact {
+  id            String @id @default(cuid())
+  organizationId String?
+  processId     String
+  process       Process @relation(fields: [processId], references: [id], onDelete: Cascade)
+  automationPotential   Float @default(0)
+  augmentationPotential Float @default(0)
+  transformationScore   Float @default(0) // 0-100
+  affectedActivityCount Int @default(0)
+  highImpactActivityCount Int @default(0)
+  computedAt    DateTime @default(now())
+
+  @@unique([processId])
+  @@index([processId])
+  @@index([organizationId])
+}
+
+// ---------------------------------------------------------------------------
+// Recommendations & Explainability
+// ---------------------------------------------------------------------------
+
+model Recommendation {
+  id           String @id @default(cuid())
+  organizationId String
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  type         String // FUTURE_SKILL | RESKILLING | PROCESS | DECLINING_SKILL | GENERIC
+  title        String
+  description  String?
+  score        Float @default(0) // 0-100
+  confidence   Float @default(0.5)
+  // Structured reasoning chain: process -> activity -> role -> skill -> impact -> future skill
+  reasoningChain Json?
+  roleId       String?
+  role         Role? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  futureSkillId String?
+  futureSkill  FutureSkill? @relation(fields: [futureSkillId], references: [id], onDelete: SetNull)
+  status       String @default("OPEN") // OPEN | ACKNOWLEDGED | DONE | DISMISSED
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  evidence     RecommendationEvidence[]
+
+  @@index([organizationId])
+  @@index([roleId])
+  @@index([type])
+}
+
+model RecommendationEvidence {
+  id         String @id @default(cuid())
+  recommendationId String
+  recommendation Recommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  entityType String // PROCESS | ACTIVITY | ROLE | SKILL | FUTURE_SKILL | AI_IMPACT | KNOWLEDGE_SOURCE | DOCUMENT_CHUNK
+  entityId   String
+  label      String?
+  detail     String?
+  score      Float?
+  sourceType String @default("intelligence") // intelligence | knowledge | input
+  createdAt  DateTime @default(now())
+
+  @@index([recommendationId])
+  @@index([entityType])
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge / RAG
+// ---------------------------------------------------------------------------
+
+model KnowledgeSource {
+  id             String @id @default(cuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  industryId     String?
+  industry       Industry? @relation(fields: [industryId], references: [id], onDelete: SetNull)
+  title          String
+  source         String // origin label, e.g. filename or URL
+  sourceType     String @default("csv") // csv | json | text | markdown | pdf | url
+  documentType   String @default("report") // report | skill-description | role-description | policy | other
+  trustLevel     Float  @default(0.5) // 0-1 configured source reliability
+  version        String @default("1")
+  metadata       Json?
+  status         String @default("PENDING") // PENDING | PROCESSING | READY | FAILED
+  error          String?
+  chunkCount     Int    @default(0)
+  createdById    String?
+  createdBy      User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  documents      KnowledgeDocument[]
+  auditLogs      AuditLog[]
+
+  @@index([organizationId])
+  @@index([industryId])
+}
+
+model KnowledgeDocument {
+  id          String @id @default(cuid())
+  sourceId    String
+  source      KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  title       String
+  documentType String @default("report")
+  status      String @default("PROCESSING") // PROCESSING | READY | FAILED
+  error       String?
+  chunkCount  Int @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  chunks      DocumentChunk[]
+
+  @@index([sourceId])
+}
+
+model DocumentChunk {
+  id         String @id @default(cuid())
+  documentId String
+  document   KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  content    String
+  chunkIndex Int
+  tokenCount Int @default(0)
+  // Embedding vector serialized as JSON array of floats (portable across SQLite/Postgres).
+  // Production: switch to a Float[] + pgvector column.
+  embedding  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([documentId])
+}
+
+// ---------------------------------------------------------------------------
+// Import jobs
+// ---------------------------------------------------------------------------
+
+model DataImport {
+  id             String @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  filename       String
+  entityType     String @default("role-skills") // role-skills | activities | skills | roles
+  status         String @default("PENDING") // PENDING | PROCESSING | COMPLETED | FAILED | VALIDATED
+  totalRows      Int @default(0)
+  validRows      Int @default(0)
+  invalidRows    Int @default(0)
+  duplicateRows  Int @default(0)
+  errors         Json?
+  error          String?
+  summary        Json?
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+// ---------------------------------------------------------------------------
+// AI interactions, feedback, audit
+// ---------------------------------------------------------------------------
+
+model AiInteraction {
+  id              String @id @default(cuid())
+  organizationId  String?
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId          String?
+  user            User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  question        String
+  intent          String?
+  structuredContext Json?
+  response        Json? // { answer, data, evidence, ... }
+  provider        String @default("template")
+  model           String?
+  tokens          Json?
+  latencyMs       Int?
+  sources         Json?
+  status          String @default("COMPLETED") // COMPLETED | FAILED | DEGRADED
+  createdAt       DateTime @default(now())
+
+  feedback        Feedback[]
+
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model Feedback {
+  id            String @id @default(cuid())
+  interactionId String
+  interaction   AiInteraction @relation(fields: [interactionId], references: [id], onDelete: Cascade)
+  userId        String?
+  user          User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  rating        String // HELPFUL | NOT_HELPFUL
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  @@index([interactionId])
+}
+
+model AuditLog {
+  id             String @id @default(cuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  knowledgeSourceId String?
+  knowledgeSource   KnowledgeSource? @relation(fields: [knowledgeSourceId], references: [id], onDelete: SetNull)
+  action         String
+  entityType     String?
+  entityId       String?
+  details        Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}

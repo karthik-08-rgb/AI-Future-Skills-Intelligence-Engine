@@ -1,0 +1,24 @@
+{
+  "name": "ai-future-skills-intelligence-engine",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Future Skills Intelligence Engine - a SaaS platform that models how AI and business transformation change workforce skills.",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=backend & npm run dev --workspace=frontend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "start": "npm run start --workspace=backend",
+    "test": "npm run test --workspace=backend",
+    "test:watch": "npm run test:watch --workspace=backend",
+    "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend",
+    "typecheck": "npm run typecheck --workspace=backend && npm run typecheck --workspace=frontend",
+    "setup": "npm run setup:db && npm run seed",
+    "setup:db": "npm run db:generate --workspace=backend && npm run db:migrate --workspace=backend",
+    "seed": "npm run db:seed --workspace=backend"
+  }
+}
